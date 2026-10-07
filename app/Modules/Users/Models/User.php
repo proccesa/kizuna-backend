@@ -63,6 +63,14 @@ class User extends Authenticatable
     }
 
     /**
+     * Factory del modelo (vive fuera del namespace por defecto de Laravel).
+     */
+    protected static function newFactory(): UserFactory
+    {
+        return UserFactory::new();
+    }
+
+    /**
      * Relación uno a uno con el perfil de Operador.
      */
     public function operador(): HasOne

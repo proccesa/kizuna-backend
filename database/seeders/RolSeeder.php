@@ -42,6 +42,22 @@ class RolSeeder extends Seeder
             'roles.ver',
             'permisos.listar',
             'tipos_documento.listar',
+            'catalogos.listar',
+            'prestadores.listar',
+            'prestadores.crear',
+            'prestadores.ver',
+            'prestadores.editar',
+            'sedes.listar',
+            'sedes.crear',
+            'sedes.ver',
+            'sedes.editar',
+            'especialidades.listar',
+            'especialidades.crear',
+            'especialidades.ver',
+            'especialidades.editar',
+            'portafolio.listar',
+            'portafolio.crear',
+            'portafolio.editar',
         ]);
 
         // 3. Rol Operador
@@ -52,6 +68,11 @@ class RolSeeder extends Seeder
         $rolOperador->syncPermissions([
             'operadores.ver',
             'tipos_documento.listar',
+            'catalogos.listar',
+            'sedes.listar',
+            'sedes.ver',
+            'especialidades.listar',
+            'portafolio.listar',
         ]);
 
         // 4. Rol Solo Consulta / Auditor
@@ -68,6 +89,14 @@ class RolSeeder extends Seeder
             'roles.ver',
             'permisos.listar',
             'tipos_documento.listar',
+            'catalogos.listar',
+            'prestadores.listar',
+            'prestadores.ver',
+            'sedes.listar',
+            'sedes.ver',
+            'especialidades.listar',
+            'especialidades.ver',
+            'portafolio.listar',
         ]);
     }
 }

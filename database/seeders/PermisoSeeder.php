@@ -43,6 +43,33 @@ class PermisoSeeder extends Seeder
 
             // Módulo de Tipos de Documento
             'tipos_documento.listar',
+            'catalogos.listar',
+
+            'prestadores.listar',
+            'prestadores.crear',
+            'prestadores.ver',
+            'prestadores.editar',
+            'prestadores.eliminar',
+            'prestadores.restaurar',
+
+            'sedes.listar',
+            'sedes.crear',
+            'sedes.ver',
+            'sedes.editar',
+            'sedes.eliminar',
+            'sedes.restaurar',
+
+            'especialidades.listar',
+            'especialidades.crear',
+            'especialidades.ver',
+            'especialidades.editar',
+            'especialidades.eliminar',
+            'especialidades.restaurar',
+
+            'portafolio.listar',
+            'portafolio.crear',
+            'portafolio.editar',
+            'portafolio.eliminar',
         ];
 
         foreach ($permisos as $nombrePermiso) {
