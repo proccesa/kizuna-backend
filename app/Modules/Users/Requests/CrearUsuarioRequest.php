@@ -3,6 +3,7 @@
 namespace App\Modules\Users\Requests;
 
 use App\Modules\Common\Requests\BaseApiRequest;
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Validation\Rule;
 
 class CrearUsuarioRequest extends BaseApiRequest
@@ -10,7 +11,7 @@ class CrearUsuarioRequest extends BaseApiRequest
     /**
      * Reglas de validación para la creación de un usuario.
      *
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {

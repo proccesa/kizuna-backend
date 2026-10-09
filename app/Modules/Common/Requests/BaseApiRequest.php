@@ -19,7 +19,7 @@ abstract class BaseApiRequest extends FormRequest
     /**
      * Maneja un intento de validación fallido y retorna una respuesta JSON 422 estándar.
      *
-     * @throws \Illuminate\Http\Exceptions\HttpResponseException
+     * @throws HttpResponseException
      */
     protected function failedValidation(Validator $validator): void
     {

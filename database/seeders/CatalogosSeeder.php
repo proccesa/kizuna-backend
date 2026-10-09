@@ -19,6 +19,7 @@ class CatalogosSeeder extends Seeder
             ModalidadContratacionSeeder::class,
             CupsSeeder::class,
             EspecialidadSeeder::class,
+            PlantillaHcSeeder::class,
         ]);
     }
 }

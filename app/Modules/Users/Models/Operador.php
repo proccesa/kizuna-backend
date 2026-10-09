@@ -63,7 +63,7 @@ class Operador extends Model
     protected function nombreCompleto(): Attribute
     {
         return Attribute::make(
-            get: fn() => trim("{$this->nombre} {$this->apellido}")
+            get: fn () => trim("{$this->nombre} {$this->apellido}")
         );
     }
 

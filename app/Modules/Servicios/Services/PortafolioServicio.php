@@ -68,9 +68,9 @@ class PortafolioServicio
      *
      * @return array{creados: int, existentes: int}
      */
-    public function agregar(array $sedeIds, array $cupsIds, int $duracion): array
+    public function agregar(array $sedeIds, array $cupsIds, int $duracion, ?string $tipoSala = null): array
     {
-        return DB::transaction(function () use ($sedeIds, $cupsIds, $duracion) {
+        return DB::transaction(function () use ($sedeIds, $cupsIds, $duracion, $tipoSala) {
             $existentes = PortafolioItem::whereIn('sede_id', $sedeIds)->whereIn('cups_id', $cupsIds)
                 ->get(['sede_id', 'cups_id'])
                 ->map(fn ($i) => "{$i->sede_id}:{$i->cups_id}")
@@ -85,6 +85,7 @@ class PortafolioServicio
                             'sede_id' => $sedeId,
                             'cups_id' => $cupsId,
                             'duracion_minutos' => $duracion,
+                            'tipo_sala' => $tipoSala,
                             'activo' => true,
                             'created_at' => $ahora,
                             'updated_at' => $ahora,

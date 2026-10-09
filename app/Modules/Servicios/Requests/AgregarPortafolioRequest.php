@@ -3,6 +3,7 @@
 namespace App\Modules\Servicios\Requests;
 
 use App\Modules\Common\Requests\BaseApiRequest;
+use App\Modules\Red\Models\Sala;
 use Illuminate\Validation\Rule;
 
 /**
@@ -18,6 +19,7 @@ class AgregarPortafolioRequest extends BaseApiRequest
             'cups_ids' => ['required', 'array', 'min:1', 'max:200'],
             'cups_ids.*' => ['integer', 'distinct', Rule::exists('cups', 'id')->where('habilitado', true)],
             'duracion_minutos' => ['required', 'integer', 'min:5', 'max:480'],
+            'tipo_sala' => ['nullable', Rule::in(Sala::TIPOS)],
         ];
     }
 

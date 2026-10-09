@@ -3,6 +3,8 @@
 namespace App\Modules\Users\Requests;
 
 use App\Modules\Common\Requests\BaseApiRequest;
+use App\Modules\Users\Models\Operador;
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Validation\Rule;
 
 class ActualizarUsuarioRequest extends BaseApiRequest
@@ -10,7 +12,7 @@ class ActualizarUsuarioRequest extends BaseApiRequest
     /**
      * Reglas de validación para actualizar un usuario.
      *
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
@@ -47,7 +49,7 @@ class ActualizarUsuarioRequest extends BaseApiRequest
                 'max:30',
                 // Validación única excluyendo el operador actual si existe
                 function ($attribute, $value, $fail) use ($userId) {
-                    $existe = \App\Modules\Users\Models\Operador::where('documento', $value)
+                    $existe = Operador::where('documento', $value)
                         ->where('user_id', '!=', $userId)
                         ->whereNull('deleted_at')
                         ->exists();

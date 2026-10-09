@@ -1,5 +1,7 @@
 <?php
 
+use App\Modules\Integracion\Middleware\SoloClienteIntegracion;
+use App\Modules\Integracion\Middleware\SoloUsuarios;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -7,6 +9,10 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
+use Laravel\Sanctum\Exceptions\MissingAbilityException;
+use Laravel\Sanctum\Http\Middleware\CheckAbilities;
+use Laravel\Sanctum\Http\Middleware\CheckForAnyAbility;
 use Spatie\Permission\Exceptions\UnauthorizedException;
 use Spatie\Permission\Middleware\PermissionMiddleware;
 use Spatie\Permission\Middleware\RoleMiddleware;
@@ -26,6 +32,11 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => RoleMiddleware::class,
             'permission' => PermissionMiddleware::class,
             'role_or_permission' => RoleOrPermissionMiddleware::class,
+            // Sanctum: permisos de los tokens de integración
+            'abilities' => CheckAbilities::class,
+            'ability' => CheckForAnyAbility::class,
+            'solo-usuarios' => SoloUsuarios::class,
+            'solo-integracion' => SoloClienteIntegracion::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
@@ -36,6 +47,27 @@ return Application::configure(basePath: dirname(__DIR__))
                     'exito' => false,
                     'mensaje' => 'No autenticado. Debe proporcionar un token de acceso válido.',
                 ], 401);
+            }
+        });
+
+        // Validación fuera de los FormRequest (p. ej. $request->validate en controladores)
+        $exceptions->render(function (ValidationException $e, Request $request) {
+            if ($request->is('api/*')) {
+                return response()->json([
+                    'exito' => false,
+                    'mensaje' => 'Los datos enviados no son válidos.',
+                    'errores' => $e->errors(),
+                ], 422);
+            }
+        });
+
+        // Token de integración sin el permiso (ability) requerido
+        $exceptions->render(function (MissingAbilityException $e, Request $request) {
+            if ($request->is('api/*')) {
+                return response()->json([
+                    'exito' => false,
+                    'mensaje' => 'El token de integración no tiene permiso para esta operación.',
+                ], 403);
             }
         });
 

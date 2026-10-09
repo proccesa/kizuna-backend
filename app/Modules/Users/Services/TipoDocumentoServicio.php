@@ -27,7 +27,7 @@ class TipoDocumentoServicio
     /**
      * Obtiene un tipo de documento por su ID.
      *
-     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     * @throws ModelNotFoundException
      */
     public function obtenerPorId(int $id): TipoDocumento
     {

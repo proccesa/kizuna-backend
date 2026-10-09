@@ -21,6 +21,7 @@ class PortafolioItem extends Model
         'sede_id',
         'cups_id',
         'duracion_minutos',
+        'tipo_sala',
         'activo',
     ];
 

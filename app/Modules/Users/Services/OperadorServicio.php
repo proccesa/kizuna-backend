@@ -30,7 +30,7 @@ class OperadorServicio
         }
 
         if (! empty($filtros['buscar'])) {
-            $termino = '%' . trim($filtros['buscar']) . '%';
+            $termino = '%'.trim($filtros['buscar']).'%';
             $query->where(function ($q) use ($termino) {
                 $q->where('nombre', 'ilike', $termino)
                     ->orWhere('apellido', 'ilike', $termino)
@@ -48,7 +48,7 @@ class OperadorServicio
     /**
      * Obtiene un operador por ID.
      *
-     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     * @throws ModelNotFoundException
      */
     public function obtenerPorId(int $id, bool $incluirEliminados = false): Operador
     {
@@ -81,7 +81,7 @@ class OperadorServicio
     /**
      * Actualiza la información de un operador.
      *
-     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     * @throws ModelNotFoundException
      */
     public function actualizar(int $id, array $datos): Operador
     {
@@ -94,7 +94,7 @@ class OperadorServicio
     /**
      * Elimina lógicamente a un operador.
      *
-     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     * @throws ModelNotFoundException
      */
     public function eliminar(int $id): bool
     {
@@ -106,7 +106,7 @@ class OperadorServicio
     /**
      * Restaura un operador eliminado con soft delete.
      *
-     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     * @throws ModelNotFoundException
      */
     public function restaurar(int $id): bool
     {

@@ -3,13 +3,14 @@
 namespace App\Modules\Auth\Requests;
 
 use App\Modules\Common\Requests\BaseApiRequest;
+use Illuminate\Contracts\Validation\ValidationRule;
 
 class LoginRequest extends BaseApiRequest
 {
     /**
      * Reglas de validación para inicio de sesión.
      *
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {

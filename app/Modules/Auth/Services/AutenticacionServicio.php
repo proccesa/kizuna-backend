@@ -2,8 +2,8 @@
 
 namespace App\Modules\Auth\Services;
 
+use App\Modules\Talento\Models\Especialista;
 use App\Modules\Users\Models\User;
-use Illuminate\Auth\AuthenticationException;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
@@ -12,7 +12,7 @@ class AutenticacionServicio
     /**
      * Autentica a un usuario y genera un token de acceso Sanctum.
      *
-     * @throws \Illuminate\Validation\ValidationException
+     * @throws ValidationException
      */
     public function iniciarSesion(string $email, string $password, ?string $nombreDispositivo = null): array
     {
@@ -45,6 +45,7 @@ class AutenticacionServicio
                 'email' => $usuario->email,
                 'activo' => $usuario->activo,
                 'operador' => $usuario->operador,
+                'especialista' => $this->especialista($usuario),
                 'roles' => $usuario->obtenerRoles(),
                 'permisos' => $usuario->obtenerPermisos(),
                 'creado_el' => $usuario->created_at,
@@ -89,9 +90,19 @@ class AutenticacionServicio
             'email' => $usuario->email,
             'activo' => $usuario->activo,
             'operador' => $usuario->operador,
+            'especialista' => $this->especialista($usuario),
             'roles' => $usuario->obtenerRoles(),
             'permisos' => $usuario->obtenerPermisos(),
             'creado_el' => $usuario->created_at,
         ];
+    }
+
+    /**
+     * Profesional vinculado a la cuenta (anestesiólogo, cirujano…), si lo hay.
+     */
+    private function especialista(User $usuario): ?array
+    {
+        return Especialista::with('especialidades:id,codigo,nombre')->where('user_id', $usuario->id)->first()
+            ?->only(['id', 'nombre_completo', 'registro_profesional', 'especialidades']);
     }
 }

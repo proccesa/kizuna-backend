@@ -3,6 +3,7 @@
 namespace App\Modules\Users\Requests;
 
 use App\Modules\Common\Requests\BaseApiRequest;
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Validation\Rule;
 
 class ActualizarOperadorRequest extends BaseApiRequest
@@ -10,7 +11,7 @@ class ActualizarOperadorRequest extends BaseApiRequest
     /**
      * Reglas de validación para actualizar un operador.
      *
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {

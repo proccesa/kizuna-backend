@@ -3,6 +3,8 @@
 namespace App\Modules\Servicios\Requests;
 
 use App\Modules\Common\Requests\BaseApiRequest;
+use App\Modules\Red\Models\Sala;
+use Illuminate\Validation\Rule;
 
 class ActualizarPortafolioRequest extends BaseApiRequest
 {
@@ -10,6 +12,7 @@ class ActualizarPortafolioRequest extends BaseApiRequest
     {
         return [
             'duracion_minutos' => ['sometimes', 'required', 'integer', 'min:5', 'max:480'],
+            'tipo_sala' => ['nullable', Rule::in(Sala::TIPOS)],
             'activo' => ['sometimes', 'boolean'],
         ];
     }

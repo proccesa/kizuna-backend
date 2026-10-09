@@ -37,7 +37,7 @@ class UsuarioServicio
 
         // Filtro de búsqueda general (nombre, email, documento u operador)
         if (! empty($filtros['buscar'])) {
-            $termino = '%' . trim($filtros['buscar']) . '%';
+            $termino = '%'.trim($filtros['buscar']).'%';
             $query->where(function ($q) use ($termino) {
                 $q->where('name', 'ilike', $termino)
                     ->orWhere('email', 'ilike', $termino)
@@ -58,7 +58,7 @@ class UsuarioServicio
     /**
      * Obtiene un usuario por su ID con sus relaciones.
      *
-     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     * @throws ModelNotFoundException
      */
     public function obtenerPorId(int $id, bool $incluirEliminados = false): User
     {
@@ -112,7 +112,7 @@ class UsuarioServicio
     /**
      * Actualiza la información de un usuario, su operador y roles.
      *
-     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     * @throws ModelNotFoundException
      */
     public function actualizar(int $id, array $datosUsuario, ?array $datosOperador = null, ?array $roles = null): User
     {
@@ -151,7 +151,7 @@ class UsuarioServicio
     /**
      * Elimina lógicamente (SoftDelete) un usuario y su operador asociado.
      *
-     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     * @throws ModelNotFoundException
      */
     public function eliminar(int $id): bool
     {
@@ -172,7 +172,7 @@ class UsuarioServicio
     /**
      * Restaura un usuario previamente eliminado mediante SoftDelete.
      *
-     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     * @throws ModelNotFoundException
      */
     public function restaurar(int $id): bool
     {

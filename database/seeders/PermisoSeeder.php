@@ -70,6 +70,59 @@ class PermisoSeeder extends Seeder
             'portafolio.crear',
             'portafolio.editar',
             'portafolio.eliminar',
+
+            'especialistas.listar',
+            'especialistas.crear',
+            'especialistas.ver',
+            'especialistas.editar',
+            'especialistas.eliminar',
+            'especialistas.restaurar',
+            'especialistas.importar',
+
+            'agendas.listar',
+            'agendas.gestionar',
+
+            'entidades.listar',
+            'entidades.crear',
+            'entidades.ver',
+            'entidades.editar',
+            'entidades.eliminar',
+            'entidades.restaurar',
+
+            'contratos.listar',
+            'contratos.crear',
+            'contratos.ver',
+            'contratos.editar',
+            'contratos.eliminar',
+            'contratos.restaurar',
+
+            'poblaciones.listar',
+            'poblaciones.crear',
+            'poblaciones.ver',
+            'poblaciones.editar',
+            'poblaciones.eliminar',
+            'poblaciones.restaurar',
+            'poblaciones.cargar',
+
+            'ordenes.listar',
+            'ordenes.ver',
+            'ordenes.crear',
+            'ordenes.gestionar',
+            'preanestesia.configurar',
+            'citas.listar',
+            'historias.listar',
+            'historias.ver',
+            'historias.diligenciar',
+            'historias.anular',
+            'integraciones.gestionar',
+
+            'inventario.listar',
+            'inventario.gestionar',
+
+            'programacion.listar',
+            'programacion.generar',
+            'programacion.aprobar',
+            'programacion.realizar',
         ];
 
         foreach ($permisos as $nombrePermiso) {

@@ -46,7 +46,8 @@ class PortafolioControlador extends Controller
             $resultado = $this->portafolioServicio->agregar(
                 $request->validated('sede_ids'),
                 $request->validated('cups_ids'),
-                (int) $request->validated('duracion_minutos')
+                (int) $request->validated('duracion_minutos'),
+                $request->validated('tipo_sala')
             );
             $mensaje = "{$resultado['creados']} servicios agregados al portafolio.";
             if ($resultado['existentes']) {
