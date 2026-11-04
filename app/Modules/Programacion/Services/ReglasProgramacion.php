@@ -32,7 +32,16 @@ class ReglasProgramacion
             'proteccion_especial' => 100,
             // Contrato PGP atrasado: puntos × rezago (0 a 1) frente al tiempo transcurrido del contrato.
             'rezago_pgp' => 200,
+            // Contrato por evento atrasado en valor ejecutado: puntos × rezago (0 a 1).
+            'rezago_evento' => 200,
+            // Contrato por evento con el valor ya agotado (≥ 100 % comprometido): se restan estos puntos.
+            'evento_agotado' => 300,
+            // Contrato por vencer: base + 5 puntos por cada día que falte dentro de la alerta.
+            'contrato_por_vencer' => 150,
+            'dias_alerta_contrato' => 30,
         ],
+        // Puntos fijos según la modalidad del contrato de la orden (código de la modalidad => puntos).
+        'pesos_modalidad' => ['EVENTO' => 60, 'PGP' => 40, 'CAPITA' => 20],
     ];
 
     public function todas(): array

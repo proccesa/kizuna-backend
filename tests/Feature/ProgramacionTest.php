@@ -264,4 +264,63 @@ class ProgramacionTest extends TestCase
         $this->assertEqualsWithDelta(200 * (285 / 365 - 0.3), $factor['puntos'], 0.5);
         $this->assertGreaterThan($cola[$sinContrato->id]['puntaje'], $cola[$conPgp->id]['puntaje']);
     }
+
+    private function contrato(string $modalidad, string $numero, float $valor, string $fin = '2026-12-31'): Contrato
+    {
+        $entidad = Entidad::firstOrCreate(['nit' => '901234560'], ['digito_verificacion' => '1', 'razon_social' => 'EPS Prueba', 'tipo' => 'EPS', 'activo' => true]);
+
+        return Contrato::create([
+            'entidad_id' => $entidad->id, 'numero' => $numero, 'modalidad_contratacion_id' => ModalidadContratacion::where('codigo', $modalidad)->value('id'),
+            'regimen_id' => Regimen::where('codigo', 'CONTRIBUTIVO')->value('id'), 'fecha_inicio' => '2026-01-01', 'fecha_fin' => $fin, 'valor' => $valor, 'activo' => true,
+        ]);
+    }
+
+    public function test_el_motor_no_programa_despues_del_vencimiento_del_contrato_y_prioriza_los_que_vencen(): void
+    {
+        // Lo primero posible es el jueves 15: un contrato que vence el 14 ya no alcanza.
+        $vencido = $this->ordenApta('100', '1980-01-01');
+        $vencido->update(['contrato_id' => $this->contrato('CAPITA', 'CAP-1', 0, '2026-10-14')->id]);
+        // Uno que vence el viernes 16 solo puede ir el 15 o el 16, y sube de prioridad.
+        $porVencer = $this->ordenApta('200', '1980-01-01');
+        $porVencer->update(['contrato_id' => $this->contrato('CAPITA', 'CAP-2', 0, '2026-10-16')->id]);
+
+        $propuesta = $this->generar()->assertCreated()->assertJsonPath('datos.resumen.programadas', 1)->json('datos');
+        $this->assertSame('El contrato CAP-1 vence el 14/10/2026, antes de la primera fecha posible.', $propuesta['resumen']['no_programadas'][0]['motivo']);
+
+        $cirugia = collect($propuesta['cirugias'])->firstWhere('orden_id', $porVencer->id);
+        $this->assertContains($cirugia['fecha'], ['2026-10-15', '2026-10-16']);
+        // Vence en 4 días: 150 + (30 - 4) × 5 = 280 puntos. Además, 20 por ser cápita.
+        $factores = collect($cirugia['prioridad']['factores'])->pluck('puntos', 'etiqueta');
+        $this->assertEquals(280, $factores['Contrato vence en 4 días']);
+        $this->assertEquals(20, $factores['Contrato por cápita']);
+    }
+
+    public function test_cumplimiento_por_evento_sube_si_va_atrasado_y_baja_si_agoto_el_valor(): void
+    {
+        $atrasado = $this->contrato('EVENTO', 'EV-1', 10000000);
+        $atrasado->cups()->attach($this->cups->id, ['tarifa' => 1000000]);
+        $agotado = $this->contrato('EVENTO', 'EV-2', 2000000);
+        $agotado->cups()->attach($this->cups->id, ['tarifa' => 1000000]);
+        foreach ([$atrasado, $agotado, $agotado] as $n => $c) {
+            $orden = $this->ordenApta((string) (900 + $n), '1980-01-01');
+            $orden->update(['contrato_id' => $c->id, 'estado' => 'OPERADA']);
+            Cirugia::create([
+                'orden_id' => $orden->id, 'paciente_id' => $orden->paciente_id, 'cups_id' => $this->cups->id, 'sede_id' => $this->sede->id,
+                'cirujano_id' => $this->cirujano->id, 'fecha' => '2026-06-0'.($n + 1), 'hora_inicio' => '07:00', 'hora_fin' => '08:30', 'estado' => 'REALIZADA',
+            ]);
+        }
+
+        $conAtrasado = $this->ordenApta('700', '1980-01-01');
+        $conAtrasado->update(['contrato_id' => $atrasado->id]);
+        $conAgotado = $this->ordenApta('800', '1980-01-01');
+        $conAgotado->update(['contrato_id' => $agotado->id]);
+        $cola = collect($this->getJson('/api/v1/programacion/cola')->assertOk()->json('datos'))->keyBy('orden.id');
+
+        // 1 de 10 millones (10 %) frente al 78 % del tiempo transcurrido.
+        $factor = collect($cola[$conAtrasado->id]['factores'])->firstWhere('etiqueta', 'Contrato por evento atrasado (10 % de 78 % esperado)');
+        $this->assertEqualsWithDelta(200 * (285 / 365 - 0.1), $factor['puntos'], 0.5);
+        // 2 de 2 millones: valor agotado, resta puntos.
+        $this->assertEquals(-300, collect($cola[$conAgotado->id]['factores'])->firstWhere('etiqueta', 'Valor del contrato agotado (100 % comprometido)')['puntos']);
+        $this->assertGreaterThan($cola[$conAgotado->id]['puntaje'], $cola[$conAtrasado->id]['puntaje']);
+    }
 }

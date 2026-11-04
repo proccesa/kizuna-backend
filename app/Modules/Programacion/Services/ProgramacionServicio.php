@@ -71,7 +71,7 @@ class ProgramacionServicio
 
         return OrdenQuirurgica::conAvalVigente()
             ->whereNotExists(fn ($q) => $q->select(DB::raw(1))->from('cirugias')->whereColumn('cirugias.orden_id', 'ordenes_quirurgicas.id')->whereIn('cirugias.estado', ['PROPUESTA', 'APROBADA']))
-            ->with(['paciente', 'paciente.tipoDocumento:id,codigo', 'cups:id,codigo,nombre', 'especialidad:id,nombre', 'historia:id,respuestas', 'contrato:id,numero,entidad_id,modalidad_contratacion_id,fecha_inicio,fecha_fin', 'contrato.modalidad:id,codigo', 'contrato.entidad:id,sigla,razon_social'])
+            ->with(['paciente', 'paciente.tipoDocumento:id,codigo', 'cups:id,codigo,nombre', 'especialidad:id,nombre', 'historia:id,respuestas', 'contrato:id,numero,entidad_id,modalidad_contratacion_id,fecha_inicio,fecha_fin,valor', 'contrato.modalidad:id,codigo', 'contrato.entidad:id,sigla,razon_social'])
             ->get()
             ->map(function (OrdenQuirurgica $o) use ($hoy, $diasAlerta) {
                 $p = $this->prioridad->calcular($o, $hoy);

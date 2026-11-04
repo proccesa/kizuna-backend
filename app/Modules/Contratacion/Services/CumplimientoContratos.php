@@ -23,6 +23,9 @@ class CumplimientoContratos
     /** @var array<int, array<int, array{realizadas: int, programadas: int}>> conteos por contrato y CUPS */
     private array $conteos = [];
 
+    /** @var array<int, array<int, float>> tarifas por contrato y CUPS */
+    private array $tarifas = [];
+
     /**
      * Resumen de cada contrato.
      *
@@ -72,6 +75,34 @@ class CumplimientoContratos
         $actual = min(1, ($conteo['realizadas'] + $conteo['programadas']) / $cantidad);
 
         return ['esperado' => round($esperado, 4), 'actual' => round($actual, 4), 'rezago' => round(max(0, $esperado - $actual), 4)];
+    }
+
+    /**
+     * Rezago de un contrato por evento en valor: lo comprometido (realizadas + aprobadas, por su tarifa)
+     * frente al tiempo transcurrido. Null si no aplica (otra modalidad o sin valor pactado).
+     *
+     * @return array{esperado: float, actual: float, rezago: float}|null
+     */
+    public function rezagoEvento(Contrato $contrato, ?Carbon $hoy = null): ?array
+    {
+        if ($contrato->modalidad?->codigo !== 'EVENTO') {
+            return null;
+        }
+        // Si el contrato se cargó con columnas parciales, se lee su valor.
+        $valor = (float) (array_key_exists('valor', $contrato->getAttributes()) ? $contrato->valor : Contrato::whereKey($contrato->id)->value('valor'));
+        if ($valor <= 0) {
+            return null;
+        }
+
+        $this->tarifas[$contrato->id] ??= DB::table('contrato_cups')->where('contrato_id', $contrato->id)->pluck('tarifa', 'cups_id')->map(fn ($t) => (float) $t)->all();
+        $comprometido = 0.0;
+        foreach ($this->porCups($contrato->id) as $cupsId => $conteo) {
+            $comprometido += ($conteo['realizadas'] + $conteo['programadas']) * ($this->tarifas[$contrato->id][$cupsId] ?? 0);
+        }
+        $esperado = $this->avanceTiempo($contrato, $hoy);
+        $actual = $comprometido / $valor;
+
+        return ['esperado' => round($esperado, 4), 'actual' => round($actual, 4), 'rezago' => round(max(0, $esperado - min(1, $actual)), 4)];
     }
 
     /**
@@ -168,5 +199,6 @@ class CumplimientoContratos
     public function reiniciar(): void
     {
         $this->conteos = [];
+        $this->tarifas = [];
     }
 }

@@ -25,17 +25,47 @@ use Illuminate\Support\Collection;
  */
 class VerificadorRecursos
 {
+    /**
+     * Datos guardados entre verificaciones mientras se "recuerda" (p. ej. durante una corrida del motor).
+     * Null = sin caché: cada verificación lee todo de la base.
+     *
+     * @var array<string, mixed>|null
+     */
+    private ?array $memo = null;
+
     public function __construct(
         private readonly RequerimientoServicio $requerimientos
     ) {}
+
+    /**
+     * Guarda en memoria requerimientos, salas, unidades, mantenimientos, existencias y reservas
+     * para las verificaciones siguientes. Quien lo active debe llamar a olvidarReservas() cada vez
+     * que cree o cambie reservas, y a olvidar() al terminar.
+     */
+    public function recordar(): void
+    {
+        $this->memo = [];
+    }
+
+    public function olvidar(): void
+    {
+        $this->memo = null;
+    }
+
+    public function olvidarReservas(): void
+    {
+        if ($this->memo !== null) {
+            unset($this->memo['reservas']);
+        }
+    }
 
     /**
      * @return array{viable: bool, sala: ?array, tipo_sala: ?string, recursos: list<array>, sin_requerimientos: bool, motivos: list<string>, avisos: list<string>}
      */
     public function verificar(int $cupsId, int $sedeId, Carbon $inicio, Carbon $fin): array
     {
-        $requeridos = $this->requerimientos->efectivos($cupsId, $sedeId);
-        $tipoSala = PortafolioItem::where('cups_id', $cupsId)->where('sede_id', $sedeId)->value('tipo_sala');
+        $requeridos = $this->recordado("req|{$cupsId}|{$sedeId}", fn () => $this->requerimientos->efectivos($cupsId, $sedeId));
+        $tipoSala = $this->recordado("tipo|{$cupsId}|{$sedeId}", fn () => PortafolioItem::where('cups_id', $cupsId)->where('sede_id', $sedeId)->value('tipo_sala'));
         $desde = $inicio->toDateTimeString();
         $hasta = $fin->toDateTimeString();
 
@@ -50,10 +80,11 @@ class VerificadorRecursos
         $salas = collect([null]);
         $motivos = [];
         if ($tipoSala) {
-            $ocupadas = Reserva::queCruzan($desde, $hasta)->whereNotNull('sala_id')->pluck('sala_id');
-            $salas = Sala::where('sede_id', $sedeId)->where('tipo', $tipoSala)->where('activo', true)->whereNotIn('id', $ocupadas)->orderBy('codigo')->get();
+            $ocupadas = $this->cruzan($this->reservasActivas()['salas'], $desde, $hasta)->pluck('sala_id')->all();
+            $todas = $this->recordado("salas|{$sedeId}|{$tipoSala}", fn () => Sala::where('sede_id', $sedeId)->where('tipo', $tipoSala)->where('activo', true)->orderBy('codigo')->get());
+            $salas = $todas->reject(fn (Sala $s) => in_array($s->id, $ocupadas, true))->values();
             if ($salas->isEmpty()) {
-                $motivos[] = Sala::where('sede_id', $sedeId)->where('tipo', $tipoSala)->where('activo', true)->exists()
+                $motivos[] = $todas->isNotEmpty()
                     ? 'Todas las salas de tipo '.$this->nombreTipoSala($tipoSala).' están ocupadas en ese horario.'
                     : 'La sede no tiene salas de tipo '.$this->nombreTipoSala($tipoSala).'.';
             }
@@ -98,22 +129,25 @@ class VerificadorRecursos
      */
     private function unidadesDisponibles(Item $item, int $sedeId, Carbon $inicio, Carbon $fin): Collection
     {
-        $unidades = Unidad::where('item_id', $item->id)->where('sede_id', $sedeId)->where('estado', '!=', 'BAJA')->orderBy('codigo')->get();
+        $unidades = $this->recordado("uni|{$item->id}|{$sedeId}", fn () => Unidad::where('item_id', $item->id)->where('sede_id', $sedeId)->where('estado', '!=', 'BAJA')->orderBy('codigo')->get());
         if ($unidades->isEmpty()) {
             return collect();
         }
 
-        $ids = $unidades->pluck('id');
+        $ids = $unidades->pluck('id')->all();
         $desde = $inicio->toDateTimeString();
         $hasta = $fin->toDateTimeString();
+        $porUnidad = $this->reservasActivas()['unidades'];
+        $deLasUnidades = fn (string $hastaCruce) => collect($ids)
+            ->filter(fn ($id) => isset($porUnidad[$id]) && $this->cruzan($porUnidad[$id], $desde, $hastaCruce)->isNotEmpty())->flip();
         // Para el instrumental, una reserva ocupa la caja hasta que termina su esterilización.
-        $reservadas = Reserva::queCruzan($desde, $hasta)->whereIn('unidad_id', $ids)->pluck('unidad_id')->flip();
+        $reservadas = $deLasUnidades($hasta);
         if ($item->tipo === 'INSTRUMENTAL' && $item->minutos_esterilizacion) {
             // Una caja reservada justo después también bloquea: debe quedar libre hasta fin + esterilización.
-            $hastaConReproceso = $fin->copy()->addMinutes($item->minutos_esterilizacion)->toDateTimeString();
-            $reservadas = $reservadas->union(Reserva::where('estado', 'ACTIVA')->whereIn('unidad_id', $ids)->where('inicio', '<', $hastaConReproceso)->where('libera_en', '>', $desde)->pluck('unidad_id')->flip());
+            $reservadas = $reservadas->union($deLasUnidades($fin->copy()->addMinutes($item->minutos_esterilizacion)->toDateTimeString()));
         }
-        $enMantenimiento = Mantenimiento::whereIn('unidad_id', $ids)->where('estado', 'PROGRAMADO')->where('inicio', '<', $hasta)->where('fin', '>', $desde)->pluck('unidad_id')->flip();
+        $mantenimientos = $this->recordado("mant|{$item->id}|{$sedeId}", fn () => Mantenimiento::whereIn('unidad_id', $ids)->where('estado', 'PROGRAMADO')->toBase()->get(['unidad_id', 'inicio', 'fin']));
+        $enMantenimiento = $mantenimientos->filter(fn ($m) => $m->inicio < $hasta && $m->fin > $desde)->pluck('unidad_id')->flip();
         $fecha = $inicio->copy()->startOfDay();
 
         return $unidades->map(function (Unidad $u) use ($item, $reservadas, $enMantenimiento, $fecha) {
@@ -178,10 +212,10 @@ class VerificadorRecursos
     private function evaluarInsumo(RequerimientoCups $r, int $sedeId, Carbon $inicio): array
     {
         $fecha = $inicio->toDateString();
-        $existencias = (int) Existencia::where('item_id', $r->item_id)->where('sede_id', $sedeId)
-            ->where(fn ($q) => $q->whereNull('vence')->orWhereDate('vence', '>=', $fecha))->sum('cantidad');
-        $reservado = (int) Reserva::where('item_id', $r->item_id)->where('sede_id', $sedeId)->whereNull('unidad_id')->where('estado', 'ACTIVA')->sum('cantidad');
-        $vencidas = (int) Existencia::where('item_id', $r->item_id)->where('sede_id', $sedeId)->whereDate('vence', '<', $fecha)->sum('cantidad');
+        $lotes = $this->recordado("exist|{$r->item_id}|{$sedeId}", fn () => Existencia::where('item_id', $r->item_id)->where('sede_id', $sedeId)->toBase()->get(['cantidad', 'vence']));
+        $existencias = (int) $lotes->filter(fn ($l) => $l->vence === null || substr($l->vence, 0, 10) >= $fecha)->sum('cantidad');
+        $vencidas = (int) $lotes->filter(fn ($l) => $l->vence !== null && substr($l->vence, 0, 10) < $fecha)->sum('cantidad');
+        $reservado = (int) ($this->reservasActivas()['insumos']["{$r->item_id}|{$sedeId}"] ?? 0);
         $disponible = max(0, $existencias - $reservado);
 
         $motivos = [];
@@ -201,6 +235,46 @@ class VerificadorRecursos
             'motivos' => $motivos,
             'avisos' => [],
         ];
+    }
+
+    /**
+     * Reservas activas en una sola consulta, indexadas: las de sala, las de cada unidad y el total reservado
+     * de cada insumo por sede.
+     *
+     * @return array{salas: Collection, unidades: array<int, Collection>, insumos: array<string, int>}
+     */
+    private function reservasActivas(): array
+    {
+        return $this->recordado('reservas', function () {
+            $filas = Reserva::where('estado', 'ACTIVA')->toBase()->get(['sede_id', 'sala_id', 'item_id', 'unidad_id', 'cantidad', 'inicio', 'libera_en']);
+
+            return [
+                'salas' => $filas->whereNotNull('sala_id')->values(),
+                'unidades' => $filas->whereNotNull('unidad_id')->groupBy('unidad_id')->all(),
+                'insumos' => $filas->filter(fn ($r) => $r->item_id !== null && $r->unidad_id === null)
+                    ->groupBy(fn ($r) => "{$r->item_id}|{$r->sede_id}")->map(fn ($g) => (int) $g->sum('cantidad'))->all(),
+            ];
+        });
+    }
+
+    /**
+     * Igual que Reserva::queCruzan($desde, $hasta): empiezan antes de $hasta y se liberan después de $desde.
+     */
+    private function cruzan(Collection $reservas, string $desde, string $hasta): Collection
+    {
+        return $reservas->filter(fn ($r) => $r->inicio < $hasta && $r->libera_en > $desde);
+    }
+
+    private function recordado(string $clave, callable $calcular): mixed
+    {
+        if ($this->memo === null) {
+            return $calcular();
+        }
+        if (! array_key_exists($clave, $this->memo)) {
+            $this->memo[$clave] = $calcular();
+        }
+
+        return $this->memo[$clave];
     }
 
     private function nombreTipoSala(string $tipo): string

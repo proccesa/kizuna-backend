@@ -37,6 +37,24 @@ class MotorProgramacion
     /** @var array<string, int> carga de cirugías por cirujano en el periodo (para repartir) */
     private array $carga = [];
 
+    /*
+     * Cachés de la corrida, para no repetir miles de consultas iguales. Agendas y ausencias no cambian
+     * durante la corrida; la ocupación de cada profesional se actualiza al crear cada cirugía, y las
+     * verificaciones de recursos se invalidan en cuanto se reserva algo.
+     */
+
+    /** @var Collection<int, Collection<int, Agenda>> agendas activas por especialista */
+    private Collection $agendas;
+
+    /** @var Collection<int, Collection<int, Ausencia>> ausencias por especialista */
+    private Collection $ausencias;
+
+    /** @var array<string, Collection> franjas ocupadas por "especialista|fecha" */
+    private array $ocupacion = [];
+
+    /** @var array<string, array> resultado de VerificadorRecursos por "cups|sede|inicio|fin" */
+    private array $verificaciones = [];
+
     public function __construct(
         private readonly ReglasProgramacion $reglas,
         private readonly PrioridadServicio $prioridad,
@@ -55,13 +73,16 @@ class MotorProgramacion
             throw ValidationException::withMessages(['corrida' => ['Ya hay una propuesta pendiente. Apruébala o descártala antes de generar otra.']]);
         }
 
+        // Con cientos de órdenes la corrida supera los 30 s por defecto de PHP.
+        set_time_limit(300);
+
         $reglas = $this->reglas->todas();
         $hoy = now()->startOfDay();
 
         $ordenes = OrdenQuirurgica::conAvalVigente()
             ->whereNotExists(fn ($q) => $q->select(DB::raw(1))->from('cirugias')->whereColumn('cirugias.orden_id', 'ordenes_quirurgicas.id')->whereIn('cirugias.estado', ['PROPUESTA', 'APROBADA']))
             ->whereDate('programable_desde', '<=', $hasta->toDateString())
-            ->with(['paciente.municipio', 'historia:id,respuestas', 'cups:id,codigo,nombre', 'contrato.modalidad:id,codigo'])
+            ->with(['paciente.municipio', 'historia:id,respuestas', 'cups:id,codigo,nombre', 'contrato:id,numero,modalidad_contratacion_id,fecha_inicio,fecha_fin,valor', 'contrato.modalidad:id,codigo'])
             ->get()
             ->map(fn (OrdenQuirurgica $o) => ['orden' => $o] + $this->prioridad->calcular($o, $hoy))
             ->sortBy([['puntaje', 'desc'], [fn ($a, $b) => $a['orden']->fecha_orden <=> $b['orden']->fecha_orden]])
@@ -70,6 +91,21 @@ class MotorProgramacion
         $this->carga = Cirugia::whereIn('estado', ['PROPUESTA', 'APROBADA'])->whereBetween('fecha', [$desde->toDateString(), $hasta->toDateString()])
             ->selectRaw('cirujano_id, COUNT(*) as total')->groupBy('cirujano_id')->pluck('total', 'cirujano_id')->map(fn ($n) => (int) $n)->all();
 
+        $this->agendas = Agenda::where('activo', true)->get()->groupBy('especialista_id');
+        $this->ausencias = Ausencia::whereDate('fecha_inicio', '<=', $hasta->toDateString())->whereDate('fecha_fin', '>=', $desde->toDateString())->get()->groupBy('especialista_id');
+        $this->ocupacion = [];
+        $this->verificaciones = [];
+        $this->verificador->recordar();
+
+        try {
+            return $this->correr($ordenes, $desde, $hasta, $sedeIds, $usuarioId, $reglas, $hoy);
+        } finally {
+            $this->verificador->olvidar();
+        }
+    }
+
+    private function correr(Collection $ordenes, Carbon $desde, Carbon $hasta, ?array $sedeIds, ?int $usuarioId, array $reglas, Carbon $hoy): Corrida
+    {
         return DB::transaction(function () use ($ordenes, $desde, $hasta, $sedeIds, $usuarioId, $reglas, $hoy) {
             $corrida = Corrida::create(['desde' => $desde->toDateString(), 'hasta' => $hasta->toDateString(), 'sede_ids' => $sedeIds, 'estado' => 'PROPUESTA', 'creada_por' => $usuarioId]);
             $noProgramadas = [];
@@ -107,11 +143,21 @@ class MotorProgramacion
     {
         /** @var OrdenQuirurgica $orden */
         $orden = $candidata['orden'];
-        $inicioVentana = collect([$orden->programable_desde, $hoy->copy()->addDays($reglas['anticipacion_dias']), $desde])
-            ->map(fn (Carbon $f) => $f->copy()->startOfDay())->sortBy(fn (Carbon $f) => $f->timestamp)->last();
-        $finVentana = collect([$orden->aval_hasta, $hasta])
+        // La cirugía debe caer dentro del aval y de la vigencia del contrato (fuera de ella la EPS no la reconoce).
+        $contrato = $orden->contrato;
+        $inicioVentana = collect([$orden->programable_desde, $hoy->copy()->addDays($reglas['anticipacion_dias']), $desde, $contrato?->fecha_inicio])
+            ->filter()->map(fn (Carbon $f) => $f->copy()->startOfDay())->sortBy(fn (Carbon $f) => $f->timestamp)->last();
+        $finAval = collect([$orden->aval_hasta, $hasta])
             ->map(fn (Carbon $f) => $f->copy()->startOfDay())->sortBy(fn (Carbon $f) => $f->timestamp)->first();
+        $finVentana = $contrato?->fecha_fin && $contrato->fecha_fin->copy()->startOfDay()->lt($finAval) ? $contrato->fecha_fin->copy()->startOfDay() : $finAval;
         if ($inicioVentana->gt($finVentana)) {
+            if ($contrato?->fecha_fin && $contrato->fecha_fin->lt($inicioVentana)) {
+                return "El contrato {$contrato->numero} vence el {$contrato->fecha_fin->format('d/m/Y')}, antes de la primera fecha posible.";
+            }
+            if ($contrato?->fecha_inicio && $contrato->fecha_inicio->gt($finAval)) {
+                return "El contrato {$contrato->numero} empieza el {$contrato->fecha_inicio->format('d/m/Y')}, después del periodo o del aval.";
+            }
+
             return 'La ventana del aval no alcanza el periodo programado.';
         }
 
@@ -143,7 +189,7 @@ class MotorProgramacion
                 $inicio = Carbon::parse("{$dia->toDateString()} {$horaInicio}");
                 $fin = Carbon::parse("{$dia->toDateString()} {$horaFin}");
 
-                $verificacion = $this->verificador->verificar($orden->cups_id, $sede->id, $inicio, $fin->copy()->addMinutes($reglas['rotacion_minutos']));
+                $verificacion = $this->verificar($orden->cups_id, $sede->id, $inicio, $fin->copy()->addMinutes($reglas['rotacion_minutos']));
                 if (! $verificacion['viable']) {
                     $faltante = collect($verificacion['recursos'])->firstWhere('ok', false);
                     $anotar(2, $verificacion['motivos'][0] ?? ($faltante ? "Falta {$faltante['item']['nombre']} ({$faltante['disponible']} de {$faltante['requerido']})." : 'Faltan recursos.'));
@@ -227,19 +273,16 @@ class MotorProgramacion
     private function horasDelCirujano(Especialista $cirujano, int $especialidadId, int $sedeId, Carbon $dia, int $duracion, array $reglas): array
     {
         $fecha = $dia->toDateString();
-        if (Ausencia::where('especialista_id', $cirujano->id)->whereDate('fecha_inicio', '<=', $fecha)->whereDate('fecha_fin', '>=', $fecha)->exists()) {
+        if ($this->ausente($cirujano->id, $fecha)) {
             return [];
         }
 
-        $franjas = Agenda::where('especialista_id', $cirujano->id)->where('especialidad_id', $especialidadId)->where('sede_id', $sedeId)->where('activo', true)
-            ->whereDate('vigente_desde', '<=', $fecha)->where(fn ($q) => $q->whereNull('vigente_hasta')->orWhereDate('vigente_hasta', '>=', $fecha))
-            ->get()->filter(fn (Agenda $a) => in_array($dia->isoWeekday(), $a->dias ?? [], true));
+        $franjas = $this->agendasDelDia($cirujano->id, $sedeId, $dia, $especialidadId);
         if ($franjas->isEmpty()) {
             return [];
         }
 
-        $ocupado = Cirugia::where('cirujano_id', $cirujano->id)->whereDate('fecha', $fecha)->whereIn('estado', ['PROPUESTA', 'APROBADA'])->get(['hora_inicio', 'hora_fin'])
-            ->concat(Cita::where('especialista_id', $cirujano->id)->whereDate('fecha', $fecha)->where('estado', 'PROGRAMADA')->get(['hora_inicio', 'hora_fin']));
+        $ocupado = $this->ocupado($cirujano->id, $fecha);
 
         $horas = [];
         foreach ($franjas as $franja) {
@@ -301,14 +344,57 @@ class MotorProgramacion
         [$i, $f] = [$inicio->format('H:i'), $fin->format('H:i')];
         $especialidad = $this->reglasPreanestesia->especialidad();
 
-        $cubre = Agenda::where('especialista_id', $especialistaId)->where('sede_id', $sedeId)->where('activo', true)
-            ->when($especialidad, fn ($q) => $q->where('especialidad_id', $especialidad->id))
-            ->whereDate('vigente_desde', '<=', $fecha)->where(fn ($q) => $q->whereNull('vigente_hasta')->orWhereDate('vigente_hasta', '>=', $fecha))
-            ->get()->contains(fn (Agenda $a) => in_array($inicio->isoWeekday(), $a->dias ?? [], true) && $a->hora_inicio <= $i && $a->hora_fin >= $f);
+        $cubre = $this->agendasDelDia($especialistaId, $sedeId, $inicio, $especialidad?->id)
+            ->contains(fn (Agenda $a) => $a->hora_inicio <= $i && $a->hora_fin >= $f);
 
         return $cubre
-            && ! Ausencia::where('especialista_id', $especialistaId)->whereDate('fecha_inicio', '<=', $fecha)->whereDate('fecha_fin', '>=', $fecha)->exists()
-            && ! Cita::where('especialista_id', $especialistaId)->whereDate('fecha', $fecha)->where('estado', 'PROGRAMADA')->where('hora_inicio', '<', $f)->where('hora_fin', '>', $i)->exists();
+            && ! $this->ausente($especialistaId, $fecha)
+            && ! $this->ocupado($especialistaId, $fecha, soloCitas: true)->contains(fn ($o) => $o->hora_inicio < $f && $o->hora_fin > $i);
+    }
+
+    /**
+     * Franjas de agenda activas y vigentes del especialista en la sede para ese día de la semana.
+     *
+     * @return Collection<int, Agenda>
+     */
+    private function agendasDelDia(int $especialistaId, int $sedeId, Carbon $dia, ?int $especialidadId): Collection
+    {
+        $fecha = $dia->toDateString();
+
+        return ($this->agendas[$especialistaId] ?? collect())->filter(fn (Agenda $a) => $a->sede_id === $sedeId
+            && ($especialidadId === null || $a->especialidad_id === $especialidadId)
+            && $a->vigente_desde->toDateString() <= $fecha
+            && ($a->vigente_hasta === null || $a->vigente_hasta->toDateString() >= $fecha)
+            && in_array($dia->isoWeekday(), $a->dias ?? [], true));
+    }
+
+    private function ausente(int $especialistaId, string $fecha): bool
+    {
+        return ($this->ausencias[$especialistaId] ?? collect())
+            ->contains(fn (Ausencia $a) => $a->fecha_inicio->toDateString() <= $fecha && $a->fecha_fin->toDateString() >= $fecha);
+    }
+
+    /**
+     * Franjas ocupadas del especialista ese día: cirugías propuestas o aprobadas (como cirujano) y citas programadas.
+     */
+    private function ocupado(int $especialistaId, string $fecha, bool $soloCitas = false): Collection
+    {
+        $clave = "{$especialistaId}|{$fecha}";
+        $this->ocupacion[$clave] ??= [
+            'cirugias' => Cirugia::where('cirujano_id', $especialistaId)->whereDate('fecha', $fecha)->whereIn('estado', ['PROPUESTA', 'APROBADA'])->get(['hora_inicio', 'hora_fin']),
+            'citas' => Cita::where('especialista_id', $especialistaId)->whereDate('fecha', $fecha)->where('estado', 'PROGRAMADA')->get(['hora_inicio', 'hora_fin']),
+        ];
+
+        return $soloCitas ? $this->ocupacion[$clave]['citas'] : $this->ocupacion[$clave]['cirugias']->concat($this->ocupacion[$clave]['citas']);
+    }
+
+    /**
+     * VerificadorRecursos con caché: el resultado solo cambia cuando se reserva algo (ver crearCirugia).
+     */
+    private function verificar(int $cupsId, int $sedeId, Carbon $inicio, Carbon $fin): array
+    {
+        return $this->verificaciones["{$cupsId}|{$sedeId}|{$inicio->toDateTimeString()}|{$fin->toDateTimeString()}"]
+            ??= $this->verificador->verificar($cupsId, $sedeId, $inicio, $fin);
     }
 
     private function crearCirugia(Corrida $corrida, array $candidata, int $sedeId, int $cirujanoId, ?int $anestesiologoId, Carbon $inicio, Carbon $fin, array $verificacion, array $reglas): Cirugia
@@ -360,6 +446,11 @@ class MotorProgramacion
         }
 
         $this->carga[$cirujanoId] = ($this->carga[$cirujanoId] ?? 0) + 1;
+        // Hay reservas nuevas: las verificaciones guardadas ya no valen, y el cirujano queda ocupado en esa franja.
+        $this->verificaciones = [];
+        $this->verificador->olvidarReservas();
+        $this->ocupado($cirujanoId, $cirugia->fecha->toDateString());
+        $this->ocupacion["{$cirujanoId}|{$cirugia->fecha->toDateString()}"]['cirugias']->push($cirugia);
 
         return $cirugia;
     }

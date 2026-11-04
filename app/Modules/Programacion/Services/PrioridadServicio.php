@@ -23,7 +23,8 @@ class PrioridadServicio
     public function calcular(OrdenQuirurgica $orden, ?Carbon $hoy = null): array
     {
         $hoy ??= now()->startOfDay();
-        $p = $this->reglas->todas()['pesos'];
+        $reglas = $this->reglas->todas();
+        $p = $reglas['pesos'];
         $factores = [];
 
         if ($orden->prioridad === 'PRIORITARIA') {
@@ -43,14 +44,40 @@ class PrioridadServicio
             $factores[] = ['etiqueta' => "{$espera} días de espera", 'puntos' => (float) min($p['espera_maxima'], $espera * $p['espera_por_dia'])];
         }
 
-        if ($orden->contrato_id && ($p['rezago_pgp'] ?? 0) > 0) {
+        if ($orden->contrato_id) {
             $orden->loadMissing('contrato.modalidad');
-            $rezago = $orden->contrato ? $this->cumplimiento->rezagoPgp($orden->contrato, $orden->cups_id, $hoy) : null;
+        }
+        if ($contrato = $orden->contrato) {
+            $modalidad = $contrato->modalidad?->codigo;
+            $porModalidad = (float) ($reglas['pesos_modalidad'][$modalidad] ?? 0);
+            if ($porModalidad > 0) {
+                $factores[] = ['etiqueta' => 'Contrato '.($modalidad === 'CAPITA' ? 'por cápita' : ($modalidad === 'EVENTO' ? 'por evento' : $modalidad)), 'puntos' => $porModalidad];
+            }
+
+            // Cumplimiento: los contratos atrasados frente al tiempo transcurrido suben.
+            $rezago = ($p['rezago_pgp'] ?? 0) > 0 ? $this->cumplimiento->rezagoPgp($contrato, $orden->cups_id, $hoy) : null;
             if ($rezago && $rezago['rezago'] > 0) {
                 $factores[] = [
                     'etiqueta' => sprintf('Contrato PGP atrasado (%d %% de %d %% esperado)', round($rezago['actual'] * 100), round($rezago['esperado'] * 100)),
                     'puntos' => round($p['rezago_pgp'] * $rezago['rezago'], 2),
                 ];
+            }
+            $evento = $this->cumplimiento->rezagoEvento($contrato, $hoy);
+            if ($evento && $evento['actual'] >= 1 && ($p['evento_agotado'] ?? 0) > 0) {
+                $factores[] = ['etiqueta' => sprintf('Valor del contrato agotado (%d %% comprometido)', round($evento['actual'] * 100)), 'puntos' => -(float) $p['evento_agotado']];
+            } elseif ($evento && $evento['rezago'] > 0 && ($p['rezago_evento'] ?? 0) > 0) {
+                $factores[] = [
+                    'etiqueta' => sprintf('Contrato por evento atrasado (%d %% de %d %% esperado)', round($evento['actual'] * 100), round($evento['esperado'] * 100)),
+                    'puntos' => round($p['rezago_evento'] * $evento['rezago'], 2),
+                ];
+            }
+
+            // Vencimiento: si el contrato termina pronto hay que operar antes (después no se puede programar).
+            if ($contrato->fecha_fin && ($p['contrato_por_vencer'] ?? 0) > 0) {
+                $restantes = (int) $hoy->diffInDays($contrato->fecha_fin, false);
+                if ($restantes >= 0 && $restantes <= $p['dias_alerta_contrato']) {
+                    $factores[] = ['etiqueta' => "Contrato vence en {$restantes} días", 'puntos' => (float) ($p['contrato_por_vencer'] + ($p['dias_alerta_contrato'] - $restantes) * 5)];
+                }
             }
         }
 

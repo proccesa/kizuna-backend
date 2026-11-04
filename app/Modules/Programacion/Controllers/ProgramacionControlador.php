@@ -102,6 +102,8 @@ class ProgramacionControlador extends ControladorBase
             'hora_reservada_temprana' => ['sometimes', 'date_format:H:i'],
             'pesos' => ['sometimes', 'array'],
             'pesos.*' => ['integer', 'min:0', 'max:100000'],
+            'pesos_modalidad' => ['sometimes', 'array'],
+            'pesos_modalidad.*' => ['integer', 'min:0', 'max:100000'],
         ]);
 
         return $this->ejecutar(fn () => $this->reglas->guardar($datos), 'Reglas de programación actualizadas.', 'Error al guardar las reglas.');
