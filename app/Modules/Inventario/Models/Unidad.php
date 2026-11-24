@@ -48,12 +48,12 @@ class Unidad extends Model
 
     public function item(): BelongsTo
     {
-        return $this->belongsTo(Item::class, 'item_id');
+        return $this->belongsTo(Item::class, 'item_id')->withTrashed();
     }
 
     public function sede(): BelongsTo
     {
-        return $this->belongsTo(Sede::class, 'sede_id');
+        return $this->belongsTo(Sede::class, 'sede_id')->withTrashed();
     }
 
     public function sala(): BelongsTo
