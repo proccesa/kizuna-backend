@@ -23,7 +23,8 @@ class PortafolioServicio
      */
     public function listar(array $filtros = [], int $porPagina = 25): LengthAwarePaginator
     {
-        $query = PortafolioItem::query()->with(self::RELACIONES);
+        // Solo ítems cuya sede sigue vigente: una sede eliminada (soft delete) deja ítems huérfanos con sede = null.
+        $query = PortafolioItem::query()->with(self::RELACIONES)->whereHas('sede');
 
         if (! empty($filtros['sede_id'])) {
             $query->where('sede_id', (int) $filtros['sede_id']);
